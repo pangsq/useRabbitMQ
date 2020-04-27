@@ -34,7 +34,7 @@ func send(ctx context.Context, url string) {
 	}()
 	ch, _ := conn.Channel()
 	ch.Qos(1, 0, false)
-	q, _ := ch.QueueDeclare("hello", false, false, false, false, nil)
+	ch.ExchangeDeclare("logs_topic", "topic", true, false, false, false, nil)
 	count := 0
 	for {
 		ticker := time.NewTicker(time.Second * 1)
@@ -42,9 +42,11 @@ func send(ctx context.Context, url string) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			ch.Publish("", q.Name, false, false, amqp.Publishing{
+			i := strconv.Itoa(rand.Intn(5))
+			j := strconv.Itoa(rand.Intn(5))
+			ch.Publish("logs_topic", i+"."+j, false, false, amqp.Publishing{
 				ContentType: "text/plain",
-				Body:        []byte("hello world " + strconv.Itoa(count)),
+				Body:        []byte("hello world " + strconv.Itoa(count) + " to " + i + "." + j),
 			})
 			count++
 		}
@@ -64,22 +66,18 @@ func receive(ctx context.Context, url string, i int) {
 		}
 	}()
 	ch, _ := conn.Channel()
-	q, _ := ch.QueueDeclare("hello", false, false, false, false, nil)
-	ch.Qos(1, 0, false)
-	msg, _ := ch.Consume(q.Name, "", false, false, false, false, nil)
+	ch.ExchangeDeclare("logs_topic", "topic", true, false, false, false, nil)
+	q, _ := ch.QueueDeclare("", false, false, true, false, nil)
+	ch.QueueBind(q.Name, strconv.Itoa(i)+".#", "logs_topic", false, nil)
+	ch.QueueBind(q.Name, "#."+strconv.Itoa(i), "logs_topic", false, nil)
+	msg, _ := ch.Consume(q.Name, "", true, false, false, false, nil)
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case m := <-msg:
 			log := strconv.Itoa(i) + " received a message: " + string(m.Body)
-			if rand.Intn(10) == 0 { // 1/10的概率消费成功
-				fmt.Println(log + " and consumed it")
-				m.Ack(false)
-			} else {
-				fmt.Println(log + " but did not consume it")
-				m.Reject(true)
-			}
+			fmt.Println(log)
 		}
 	}
 }
